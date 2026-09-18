@@ -153,7 +153,8 @@
   @media print {
     header, nav, .no-print { display: none !important; }
     body { background: #fff; }
-    .tab { display: block !important; }
+    .tab { display: none !important; }
+    .tab.active { display: block !important; }
   }
 </style>
 </head>
@@ -255,6 +256,7 @@
       <button class="btn accent" id="commitBtn" style="margin-left:8px;">Commit job — update offcut inventory</button>
       <span id="commitMsg" style="margin-left:10px;font-size:12.5px;"></span>
     </div>
+    <div style="font-size:13px;color:var(--text-dim);margin-bottom:8px;">MM Reference: <b id="cutListRefNumber">—</b></div>
     <div id="cutListStats" class="stat-row"></div>
     <div id="cutListContent"><div class="empty-state">Run nesting on the BOM &amp; Nesting tab to generate a cut list.</div></div>
   </section>
@@ -266,6 +268,7 @@
     </div>
     <div class="card">
       <h2>Buyer Sheet — new stock required</h2>
+      <div style="font-size:13px;color:var(--text-dim);margin-top:-6px;margin-bottom:10px;">MM Reference: <b id="procRefNumber">—</b></div>
       <div class="table-wrap">
         <table id="procTable">
           <thead>
