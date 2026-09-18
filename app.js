@@ -23,8 +23,8 @@
    3. Fill in SUPABASE_URL and SUPABASE_ANON_KEY below.
    ============================================================ */
 
-const SUPABASE_URL = "https://egcmleyqbtjdwuspgbsi.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVnY21sZXlxYnRqZHd1c3BnYnNpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkwOTQ3MDgsImV4cCI6MjA5NDY3MDcwOH0.Bc43J1OzmTKaVNCdKT1bXvIfak1jcxmCqVuyJKZINfw";
+const SUPABASE_URL = "YOUR_SUPABASE_URL_HERE";
+const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY_HERE";
 
 let supabaseClient = null;
 try {
@@ -68,6 +68,15 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
 });
 
 // ---------- BOM upload ----------
+// Numbers in structural BOQ exports (StruMIS/Tekla-style) use a space as the
+// thousands separator and a comma as the decimal separator, e.g. "2 604" or "14,97".
+function parseEuroNumber(v) {
+  if (v === null || v === undefined || v === "") return NaN;
+  if (typeof v === "number") return v;
+  const cleaned = String(v).replace(/[\s\u00A0]/g, "").replace(",", ".");
+  return parseFloat(cleaned);
+}
+
 document.getElementById("bomFile").addEventListener("change", (e) => {
   const file = e.target.files[0];
   if (!file) return;
@@ -77,14 +86,101 @@ document.getElementById("bomFile").addEventListener("change", (e) => {
       const data = new Uint8Array(evt.target.result);
       const wb = XLSX.read(data, { type: "array" });
       const sheet = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
-      ingestRows(rows);
+      const grid = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: false });
+      const smart = tryParseBoqGrid(grid);
+      if (smart) {
+        addBomLines(smart.cleaned, smart.message, smart.isError);
+      } else {
+        // Fall back to simple flat template: Profile, Grade, Length_mm, Qty, Description
+        const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+        const cleaned = [];
+        rows.forEach(r => {
+          const profile = r.Profile || r.profile || r.PROFILE || "";
+          const grade = r.Grade || r.grade || r.GRADE || "Mild Steel";
+          const length = Number(r.Length_mm || r.length_mm || r.Length || r.length || 0);
+          const qty = Number(r.Qty || r.qty || r.Quantity || r.quantity || 0);
+          const description = r.Description || r.description || "";
+          if (profile && length > 0 && qty > 0) {
+            cleaned.push({ profile: String(profile).trim(), grade: String(grade).trim(), length, qty, description });
+          }
+        });
+        if (cleaned.length === 0) {
+          setMsg("uploadMsg", "No valid rows found. Expected either a simple sheet with Profile/Grade/Length_mm/Qty columns, or a structural BOQ export with Mark/Quantity/Size/Grade/Length columns.", "error");
+        } else {
+          addBomLines(cleaned, `Loaded ${cleaned.length} BOM line(s).`, false);
+        }
+      }
     } catch (err) {
       setMsg("uploadMsg", "Could not read file: " + err.message, "error");
     }
   };
   reader.readAsArrayBuffer(file);
 });
+
+// Detects and parses structural BOQ exports (Mark / Quantity / Size / Grade / Length / Weight / Area),
+// which usually have a few title/metadata rows before the real header row, blank subtotal rows between
+// profile groups, and plate items ("PL ...") that this tool doesn't nest (plates come off sheet, not bar stock).
+function tryParseBoqGrid(grid) {
+  let headerRowIdx = -1;
+  let col = {};
+  for (let i = 0; i < Math.min(grid.length, 30); i++) {
+    const row = grid[i].map(c => String(c || "").trim().toLowerCase());
+    const markIdx = row.findIndex(c => c === "mark");
+    const qtyIdx = row.findIndex(c => c === "quantity" || c === "qty");
+    const sizeIdx = row.findIndex(c => c === "size" || c === "profile");
+    const lenIdx = row.findIndex(c => c.startsWith("length"));
+    const gradeIdx = row.findIndex(c => c === "grade");
+    if (qtyIdx >= 0 && sizeIdx >= 0 && lenIdx >= 0) {
+      headerRowIdx = i;
+      col = { mark: markIdx, qty: qtyIdx, size: sizeIdx, length: lenIdx, grade: gradeIdx };
+      break;
+    }
+  }
+  if (headerRowIdx === -1) return null; // not this format — let the caller fall back
+
+  const cleaned = [];
+  let skippedPlates = 0;
+  let defaultedGrades = 0;
+  for (let i = headerRowIdx + 1; i < grid.length; i++) {
+    const row = grid[i];
+    const sizeRaw = row[col.size];
+    const qtyRaw = row[col.qty];
+    const lenRaw = row[col.length];
+    if (sizeRaw === undefined || String(sizeRaw).trim() === "") continue;
+    if (qtyRaw === undefined || String(qtyRaw).trim() === "" || lenRaw === undefined || String(lenRaw).trim() === "") continue; // subtotal/section row
+
+    const size = String(sizeRaw).trim();
+    if (/^PL\b/i.test(size)) { skippedPlates++; continue; } // plate item — not bar stock
+
+    const qty = parseEuroNumber(qtyRaw);
+    const length = parseEuroNumber(lenRaw);
+    if (!qty || !length || qty <= 0 || length <= 0) continue;
+
+    let grade = col.grade >= 0 ? String(row[col.grade] || "").trim() : "";
+    if (!grade) { grade = "Mild Steel"; defaultedGrades++; }
+
+    const mark = col.mark >= 0 ? row[col.mark] : "";
+    const description = mark !== "" && mark !== undefined ? `Mark ${mark}` : "";
+
+    cleaned.push({ profile: size, grade, length, qty, description });
+  }
+
+  if (cleaned.length === 0) {
+    return { cleaned, message: "Recognized a BOQ-style sheet but found no usable cut lines.", isError: true };
+  }
+  let msg = `Loaded ${cleaned.length} BOM line(s) from BOQ format.`;
+  if (skippedPlates > 0) msg += ` Skipped ${skippedPlates} plate item(s) — this tool nests bar stock only, not sheet/plate.`;
+  if (defaultedGrades > 0) msg += ` ${defaultedGrades} line(s) had no grade listed — defaulted to "Mild Steel", review before procuring.`;
+  return { cleaned, message: msg, isError: false };
+}
+
+function addBomLines(cleaned, message, isError) {
+  setMsg("uploadMsg", message, isError ? "error" : "ok");
+  if (cleaned.length === 0) return;
+  bomRows = bomRows.concat(cleaned);
+  renderBomTable();
+  renderGroupSettings();
+}
 
 function ingestRows(rows) {
   const cleaned = [];
@@ -102,10 +198,7 @@ function ingestRows(rows) {
     setMsg("uploadMsg", "No valid rows found. Check column headers: Profile, Grade, Length_mm, Qty.", "error");
     return;
   }
-  bomRows = bomRows.concat(cleaned);
-  setMsg("uploadMsg", `Loaded ${cleaned.length} BOM line(s).`, "ok");
-  renderBomTable();
-  renderGroupSettings();
+  addBomLines(cleaned, `Loaded ${cleaned.length} BOM line(s).`, false);
 }
 
 document.getElementById("loadSampleBtn").addEventListener("click", () => {
