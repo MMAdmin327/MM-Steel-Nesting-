@@ -23,8 +23,8 @@
    3. Fill in SUPABASE_URL and SUPABASE_ANON_KEY below.
    ============================================================ */
 
-const SUPABASE_URL = "https://egcmleyqbtjdwuspgbsi.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVnY21sZXlxYnRqZHd1c3BnYnNpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkwOTQ3MDgsImV4cCI6MjA5NDY3MDcwOH0.Bc43J1OzmTKaVNCdKT1bXvIfak1jcxmCqVuyJKZINfw";
+const SUPABASE_URL = "YOUR_SUPABASE_URL_HERE";
+const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY_HERE";
 
 let supabaseClient = null;
 try {
@@ -274,6 +274,11 @@ function categorizeProfile(text) {
   if (t.startsWith("PFC") || t.startsWith("RSC") || t.includes("CHANNEL")) return "channel";
   if (t.startsWith("UB")) return "ub";
   if (t.startsWith("UC")) return "uc";
+  if (t.startsWith("RSJ")) return "joint";
+  if (t.startsWith("IPE")) return "ipe";
+  if (t.includes("ROUND BAR") || t.includes("RONDBAR") || /^RB\d/.test(t) || t.includes(" DIA")) return "roundbar";
+  if (t.startsWith("LC") || t.startsWith("OC") || t.includes("LIPPED") || t.includes("PURLIN") || t.includes("OPEN CHANNEL")) return "opensection";
+  if (t.startsWith("CHS") || t.startsWith("SHS") || t.startsWith("RHS") || t.includes("TUBE") || t.includes("TUBING") || t.includes("PIPE")) return "tube";
   return null;
 }
 function findCatalogMatch(profileText) {
@@ -282,10 +287,22 @@ function findCatalogMatch(profileText) {
   if (!cat) return null;
   const bomNums = catalogNums(profileText);
   const candidates = STEEL_CATALOG.filter(r => r.category === cat);
-  if (cat === "flatbar" || cat === "angle") {
-    return candidates.find(r => sortedEq(r.dims, bomNums)) || null;
+
+  if (cat === "flatbar" || cat === "angle" || cat === "opensection" || cat === "tube") {
+    const matches = candidates.filter(r => sortedEq(r.dims, bomNums));
+    if (matches.length === 0) return null;
+    return matches.reduce((best, r) => (r.lengths_mm.length > best.lengths_mm.length ? r : best));
   }
-  // channel / ub / uc: two dimension numbers + a mass-designation number (e.g. UB254X146X37 -> 37 kg/m)
+  if (cat === "roundbar") {
+    if (bomNums.length === 0) return null;
+    const diameter = bomNums[0];
+    return candidates.find(r => Math.abs(r.dims[0] - diameter) <= 0.5) || null;
+  }
+  // channel / ub / uc / joint / ipe: normally two dimension numbers + a mass-designation number (e.g. UB254X146X37 -> 37 kg/m).
+  // Some conventions (e.g. "IPE200") give only the nominal depth — match on that alone in that case.
+  if (bomNums.length === 1) {
+    return candidates.find(r => Math.abs(r.dims[0] - bomNums[0]) <= 0.5) || null;
+  }
   if (bomNums.length < 3) return candidates.find(r => sortedEq(r.dims, bomNums)) || null;
   const dimsPart = bomNums.slice(0, 2), massPart = bomNums[2];
   let best = null;
