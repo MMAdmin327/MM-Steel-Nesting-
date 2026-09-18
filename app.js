@@ -23,8 +23,8 @@
    3. Fill in SUPABASE_URL and SUPABASE_ANON_KEY below.
    ============================================================ */
 
-const SUPABASE_URL = "YOUR_SUPABASE_URL_HERE";
-const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY_HERE";
+const SUPABASE_URL = "https://egcmleyqbtjdwuspgbsi.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...";
 
 let supabaseClient = null;
 try {
