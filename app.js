@@ -495,6 +495,7 @@ document.getElementById("runNestBtn").addEventListener("click", () => {
 
 // ---------- CUT LIST RENDER ----------
 function renderCutList() {
+  document.getElementById("cutListRefNumber").textContent = document.getElementById("mmNumberInput").value.trim() || "—";
   const content = document.getElementById("cutListContent");
   const statsEl = document.getElementById("cutListStats");
   if (!nestResult) { content.innerHTML = `<div class="empty-state">Run nesting first.</div>`; statsEl.innerHTML = ""; return; }
@@ -578,6 +579,7 @@ function renderCutList() {
 let procUnitPrices = {}; // key -> price
 
 function renderProcurement() {
+  document.getElementById("procRefNumber").textContent = document.getElementById("mmNumberInput").value.trim() || "—";
   const tbody = document.getElementById("procTableBody");
   if (!nestResult) { tbody.innerHTML = `<tr><td colspan="6" class="empty-state">Run nesting first.</td></tr>`; return; }
 
@@ -738,5 +740,10 @@ function renderBudget() {
 document.getElementById("budgetAmount").addEventListener("input", renderBudget);
 
 // ---------- INIT ----------
+document.getElementById("mmNumberInput").addEventListener("input", () => {
+  const val = document.getElementById("mmNumberInput").value.trim() || "—";
+  document.getElementById("procRefNumber").textContent = val;
+  document.getElementById("cutListRefNumber").textContent = val;
+});
 loadOffcuts();
 renderBudget();
