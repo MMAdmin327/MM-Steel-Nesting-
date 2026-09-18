@@ -23,8 +23,8 @@
    3. Fill in SUPABASE_URL and SUPABASE_ANON_KEY below.
    ============================================================ */
 
-const SUPABASE_URL = "https://egcmleyqbtjdwuspgbsi.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVnY21sZXlxYnRqZHd1c3BnYnNpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkwOTQ3MDgsImV4cCI6MjA5NDY3MDcwOH0.Bc43J1OzmTKaVNCdKT1bXvIfak1jcxmCqVuyJKZINfw";
+const SUPABASE_URL = "YOUR_SUPABASE_URL_HERE";
+const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY_HERE";
 
 let supabaseClient = null;
 try {
@@ -509,6 +509,7 @@ function renderCutList() {
   `;
 
   let html = "";
+
   if (nestResult.oversizedCuts.length > 0) {
     const byProfile = {};
     nestResult.oversizedCuts.forEach(c => {
@@ -531,30 +532,31 @@ function renderCutList() {
     html += `</div>`;
   }
 
+  html += `<div class="card no-print" style="padding:10px 16px;">
+    <span class="pill offcut">OFFCUT</span> = cut from existing offcut inventory &nbsp;&nbsp; <span class="pill new">NEW</span> = cut from freshly bought stock
+  </div>`;
+  html += `<div class="card"><h2>MM Cut List</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Item</th><th>Stock Length</th><th>Cuts (mm)</th><th>Total Used (mm)</th><th>Source</th></tr></thead>
+        <tbody>`;
   nestResult.groupsOutput.forEach(g => {
-    html += `<div class="card"><h2>${escapeHtml(g.profile)} — ${escapeHtml(g.grade)}</h2>`;
-    if (g.bars.length === 0) html += `<div class="empty-state">No cuts.</div>`;
-    g.bars.forEach((bar, idx) => {
-      const label = bar.source === "offcut" ? `Offcut #${String(bar.id).slice(0, 8)}` : `New bar ${idx + 1} (${fmt(bar.capacity)}mm)`;
+    const itemLabel = `${g.profile} (${g.grade})`;
+    g.bars.forEach(bar => {
+      const totalUsed = Math.round(bar.capacity - bar.remaining);
+      const cutsText = bar.cuts.map(c => fmt(c.length)).join(", ");
       const pillClass = bar.source === "offcut" ? "offcut" : "new";
-      let segsHtml = "";
-      bar.cuts.forEach(c => {
-        const pct = (c.length / bar.capacity) * 100;
-        segsHtml += `<div class="bar-seg" style="width:${pct}%;" title="${fmt(c.length)}mm ${escapeHtml(c.description || "")}">${fmt(c.length)}</div>`;
-      });
-      const wastePct = (bar.remaining / bar.capacity) * 100;
-      if (wastePct > 0.3) segsHtml += `<div class="bar-seg waste" style="width:${wastePct}%;">${fmt(Math.round(bar.remaining))}</div>`;
-      html += `
-        <div class="bar-block">
-          <div class="bar-head">
-            <span><span class="pill ${pillClass}">${bar.source === "offcut" ? "OFFCUT" : "NEW"}</span> ${label}</span>
-            <span>${bar.cuts.length} cut(s) · ${fmt(Math.round(bar.remaining))}mm left over</span>
-          </div>
-          <div class="bar-visual">${segsHtml}</div>
-        </div>`;
+      const sourceLabel = bar.source === "offcut" ? `Offcut #${String(bar.id).slice(0, 8)}` : "New";
+      html += `<tr>
+        <td>${escapeHtml(itemLabel)}</td>
+        <td>${fmt(bar.capacity)}</td>
+        <td>${cutsText}</td>
+        <td>${fmt(totalUsed)}</td>
+        <td><span class="pill ${pillClass}">${sourceLabel}</span></td>
+      </tr>`;
     });
-    html += `</div>`;
   });
+  html += `</tbody></table></div></div>`;
   content.innerHTML = html;
 }
 
