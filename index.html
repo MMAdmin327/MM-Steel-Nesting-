@@ -167,7 +167,13 @@
       <div class="sub">Mine Minerals Supplies &amp; Services &middot; Cut list · Buyer sheet · Offcut inventory</div>
     </div>
   </div>
-  <div class="sub" id="connStatus">Connecting to inventory…</div>
+  <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+    <div class="field" style="flex-direction:row;align-items:center;gap:6px;">
+      <label style="color:#c9d6de;">MM Number</label>
+      <input type="text" id="mmNumberInput" placeholder="e.g. MM-2026-0417" style="min-width:150px;">
+    </div>
+    <div class="sub" id="connStatus">Connecting to inventory…</div>
+  </div>
 </header>
 
 <nav>
@@ -306,9 +312,9 @@
     <div class="card">
       <h2>Material budget (from estimator)</h2>
       <div class="row">
-        <div class="field"><label>Job / MM number</label><input type="text" id="budgetJob" placeholder="e.g. MM-2026-0417"></div>
         <div class="field"><label>Material budget (R)</label><input type="number" id="budgetAmount" min="0" step="100"></div>
       </div>
+      <p style="font-size:12px;color:var(--text-dim);margin-top:8px;">MM number is set in the header above and applies across the whole tool.</p>
     </div>
     <div class="stat-row" id="budgetStats"></div>
   </section>
