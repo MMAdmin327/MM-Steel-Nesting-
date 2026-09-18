@@ -215,7 +215,7 @@
     <div class="card" id="nestSettingsCard" style="display:none;">
       <h2>Nesting Settings — per profile/grade group</h2>
       <p style="font-size:12.5px;color:var(--text-dim);margin-top:-6px;">
-        Choose the market stock length to nest against for each group. Offcuts in inventory are always used first, regardless of this setting.
+        Stock length options are auto-matched against the MMSS Steel Weights reference catalog where possible (shown with a ✓). Profiles with no catalog match fall back to the manual list below. Offcuts in inventory are always used first, regardless of this setting.
       </p>
       <div class="table-wrap">
         <table id="groupTable">
@@ -315,6 +315,7 @@
 
 </main>
 
+<script src="steel-catalog-data.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

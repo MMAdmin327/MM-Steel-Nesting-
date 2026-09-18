@@ -23,8 +23,8 @@
    3. Fill in SUPABASE_URL and SUPABASE_ANON_KEY below.
    ============================================================ */
 
-const SUPABASE_URL = "https://egcmleyqbtjdwuspgbsi.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVnY21sZXlxYnRqZHd1c3BnYnNpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkwOTQ3MDgsImV4cCI6MjA5NDY3MDcwOH0.Bc43J1OzmTKaVNCdKT1bXvIfak1jcxmCqVuyJKZINfw";
+const SUPABASE_URL = "YOUR_SUPABASE_URL_HERE";
+const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY_HERE";
 
 let supabaseClient = null;
 try {
@@ -256,6 +256,47 @@ function escapeHtml(s) {
   return String(s || "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// ---------- Steel catalog lookup (from MMSS Steel Weights reference sheet) ----------
+// STEEL_CATALOG is loaded from steel-catalog-data.js (see index.html script tag).
+function catalogNums(s) {
+  const m = String(s || "").match(/\d+\.?\d*/g);
+  return m ? m.map(Number) : [];
+}
+function sortedEq(a, b, tol) {
+  if (a.length !== b.length) return false;
+  const as = [...a].sort((x, y) => x - y), bs = [...b].sort((x, y) => x - y);
+  return as.every((v, i) => Math.abs(v - bs[i]) <= (tol || 0.01));
+}
+function categorizeProfile(text) {
+  const t = String(text || "").toUpperCase().trim();
+  if (t.includes("F/BAR") || t.startsWith("FL") || t.includes("FLAT")) return "flatbar";
+  if (/^L\d/.test(t)) return "angle";
+  if (t.startsWith("PFC") || t.startsWith("RSC") || t.includes("CHANNEL")) return "channel";
+  if (t.startsWith("UB")) return "ub";
+  if (t.startsWith("UC")) return "uc";
+  return null;
+}
+function findCatalogMatch(profileText) {
+  if (typeof STEEL_CATALOG === "undefined") return null;
+  const cat = categorizeProfile(profileText);
+  if (!cat) return null;
+  const bomNums = catalogNums(profileText);
+  const candidates = STEEL_CATALOG.filter(r => r.category === cat);
+  if (cat === "flatbar" || cat === "angle") {
+    return candidates.find(r => sortedEq(r.dims, bomNums)) || null;
+  }
+  // channel / ub / uc: two dimension numbers + a mass-designation number (e.g. UB254X146X37 -> 37 kg/m)
+  if (bomNums.length < 3) return candidates.find(r => sortedEq(r.dims, bomNums)) || null;
+  const dimsPart = bomNums.slice(0, 2), massPart = bomNums[2];
+  let best = null;
+  candidates.forEach(r => {
+    if (sortedEq(r.dims, dimsPart) && Math.abs(r.mass - massPart) <= 1.0) {
+      if (!best || Math.abs(r.mass - massPart) < Math.abs(best.mass - massPart)) best = r;
+    }
+  });
+  return best;
+}
+
 // ---------- Nesting settings (per group stock length) ----------
 function renderGroupSettings() {
   const card = document.getElementById("nestSettingsCard");
@@ -267,23 +308,38 @@ function renderGroupSettings() {
   bomRows.forEach(r => {
     if (!r.profile || !r.length || !r.qty) return;
     const key = groupKey(r.profile, r.grade);
-    if (!groups[key]) groups[key] = { profile: r.profile, grade: r.grade, totalCuts: 0 };
+    if (!groups[key]) groups[key] = { profile: r.profile, grade: r.grade, totalCuts: 0, maxLen: 0 };
     groups[key].totalCuts += r.qty;
+    groups[key].maxLen = Math.max(groups[key].maxLen, r.length);
   });
 
-  const stockLengths = getStockLengthOptions();
+  const manualLengths = getStockLengthOptions();
   tbody.innerHTML = "";
   Object.entries(groups).forEach(([key, g]) => {
-    if (!groupSettings[key]) groupSettings[key] = stockLengths[stockLengths.length - 1] || stockLengths[0];
-    const options = stockLengths.map(len =>
+    const match = findCatalogMatch(g.profile);
+    const catalogLengths = match ? (match.lengths_mm.length > 0 ? match.lengths_mm : [6000]) : null;
+    const options = catalogLengths || manualLengths;
+
+    if (!groupSettings[key] || !options.includes(Number(groupSettings[key]))) {
+      // auto-pick the shortest option that still covers the longest cut + a little headroom, else the longest option
+      const fitting = options.filter(len => len >= g.maxLen).sort((a, b) => a - b);
+      groupSettings[key] = fitting.length > 0 ? fitting[0] : options[options.length - 1];
+    }
+    const optionsHtml = options.map(len =>
       `<option value="${len}" ${Number(groupSettings[key]) === len ? "selected" : ""}>${fmt(len)} mm</option>`
     ).join("");
+    const catalogNote = match
+      ? `<div style="font-size:11px;color:var(--good);margin-top:2px;">✓ matched catalog: ${escapeHtml(match.label)} (${match.mass} kg/m)</div>`
+      : `<div style="font-size:11px;color:var(--text-dim);margin-top:2px;">no catalog match — using manual length list</div>`;
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${escapeHtml(g.profile)}</td>
       <td>${escapeHtml(g.grade)}</td>
       <td>${g.totalCuts}</td>
-      <td><select class="cell-input group-len-select" data-key="${key}">${options}</select></td>
+      <td>
+        <select class="cell-input group-len-select" data-key="${key}">${optionsHtml}</select>
+        ${catalogNote}
+      </td>
     `;
     tbody.appendChild(tr);
   });
