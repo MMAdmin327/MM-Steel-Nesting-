@@ -372,14 +372,32 @@ function runNesting() {
     }
   });
 
-  const result = { groupsOutput: [], errors: [], totalScrap: 0, totalNewBars: 0, totalOffcutsUsed: 0, newOffcutsCreated: [], consumedOffcutIds: [], updatedOffcuts: [] };
+  const result = { groupsOutput: [], errors: [], oversizedCuts: [], totalScrap: 0, totalNewBars: 0, totalOffcutsUsed: 0, newOffcutsCreated: [], consumedOffcutIds: [], updatedOffcuts: [] };
+  const failCounts = {};
 
   Object.entries(groups).forEach(([key, g]) => {
     const stockLen = groupSettings[key] || getStockLengthOptions()[0];
-    const cuts = [...g.cuts].sort((a, b) => b.length - a.length);
+    const match = findCatalogMatch(g.profile);
+    const catalogLens = match ? (match.lengths_mm.length > 0 ? match.lengths_mm : [6000]) : [];
+    const inventoryLens = offcutInventory.filter(o => groupKey(o.profile, o.grade) === key).map(o => o.length_mm);
+    const bestPossibleSingleLength = Math.max(stockLen, 0, ...catalogLens, ...inventoryLens);
+
+    // Split off cuts that exceed even the longest length we know is obtainable for this profile —
+    // these need a special-order length or an engineer-approved splice, not silent auto-handling.
+    const allCuts = [...g.cuts].sort((a, b) => b.length - a.length);
+    const cuts = [];
+    allCuts.forEach(cut => {
+      if (cut.length + kerf > bestPossibleSingleLength) {
+        result.oversizedCuts.push({ profile: g.profile, grade: g.grade, length: cut.length, description: cut.description, longestAvailable: bestPossibleSingleLength });
+      } else {
+        cuts.push(cut);
+      }
+    });
+    if (cuts.length === 0) return; // whole group was oversized, already recorded above
+
     const maxCutLen = Math.max(...cuts.map(c => c.length));
-    if (maxCutLen + kerf > stockLen && !offcutInventory.some(o => groupKey(o.profile, o.grade) === key && o.length_mm >= maxCutLen + kerf)) {
-      result.errors.push(`${g.profile} / ${g.grade}: a required cut (${fmt(maxCutLen)}mm) is longer than the chosen stock length (${fmt(stockLen)}mm) and no offcut covers it.`);
+    if (maxCutLen + kerf > stockLen) {
+      result.errors.push(`${g.profile} / ${g.grade}: a longer stock length is available (up to ${fmt(bestPossibleSingleLength)}mm) but not selected — pick it in Nesting Settings to fit the ${fmt(maxCutLen)}mm cut.`);
     }
 
     // Bins: offcut bins first (existing physical pieces), then new-stock bins opened on demand.
@@ -410,7 +428,7 @@ function runNesting() {
         bin.cuts.push(cut);
         bin.remaining -= need;
       } else {
-        result.errors.push(`${g.profile}: cut of ${fmt(cut.length)}mm could not be placed on any available length.`);
+        failCounts[g.profile] = (failCounts[g.profile] || 0) + 1;
       }
     });
 
@@ -441,15 +459,19 @@ function runNesting() {
     });
   });
 
+  Object.entries(failCounts).forEach(([profile, count]) => {
+    result.errors.push(`${profile}: ${count} cut(s) could not be placed on the currently selected stock length.`);
+  });
+
   return result;
 }
 
 document.getElementById("runNestBtn").addEventListener("click", () => {
   nestResult = runNesting();
-  setMsg("nestMsg", nestResult.errors.length
-    ? nestResult.errors.map(e => "⚠ " + e).join("<br>")
-    : "Nesting complete — see Cut List and Procurement tabs.",
-    nestResult.errors.length ? "error" : "ok");
+  const msgParts = [];
+  if (nestResult.oversizedCuts.length > 0) msgParts.push(`⚠ ${nestResult.oversizedCuts.length} cut(s) exceed the longest available stock length — see the Cut List tab.`);
+  if (nestResult.errors.length > 0) msgParts.push(...nestResult.errors.map(e => "⚠ " + e));
+  setMsg("nestMsg", msgParts.length ? msgParts.join("<br>") : "Nesting complete — see Cut List and Procurement tabs.", msgParts.length ? "error" : "ok");
   renderCutList();
   renderProcurement();
 });
@@ -466,9 +488,32 @@ function renderCutList() {
     <div class="stat-box"><div class="label">New bars to cut</div><div class="value">${nestResult.totalNewBars}</div></div>
     <div class="stat-box warn"><div class="label">Scrap generated</div><div class="value">${fmt(nestResult.totalScrap)} mm</div></div>
     <div class="stat-box"><div class="label">Blade kerf used</div><div class="value">${kerf} mm</div></div>
+    ${nestResult.oversizedCuts.length > 0 ? `<div class="stat-box warn"><div class="label">Needs splice/special order</div><div class="value">${nestResult.oversizedCuts.length}</div></div>` : ""}
   `;
 
   let html = "";
+  if (nestResult.oversizedCuts.length > 0) {
+    const byProfile = {};
+    nestResult.oversizedCuts.forEach(c => {
+      const k = groupKey(c.profile, c.grade);
+      if (!byProfile[k]) byProfile[k] = { profile: c.profile, grade: c.grade, longestAvailable: c.longestAvailable, items: [] };
+      byProfile[k].items.push(c);
+    });
+    html += `<div class="card" style="border-color:var(--warn);background:#fff7f4;">
+      <h2 style="color:var(--warn);">⚠ Requires splice or special-order length — not auto-nested</h2>
+      <p style="font-size:12.5px;color:var(--text-dim);margin-top:-6px;">
+        These cuts are longer than any stock length known to be available for their profile. This needs either a special-order longer length from the mill, or an engineer-approved splice (butt weld) — not something to decide automatically. Confirm with the drawing/engineer before proceeding.
+      </p>`;
+    Object.values(byProfile).forEach(grp => {
+      html += `<div style="margin-top:8px;"><b>${escapeHtml(grp.profile)} — ${escapeHtml(grp.grade)}</b> (longest known available: ${fmt(grp.longestAvailable)}mm)<ul style="margin:4px 0 0 18px;padding:0;font-size:13px;">`;
+      grp.items.forEach(c => {
+        html += `<li>${fmt(c.length)}mm required${c.description ? " — " + escapeHtml(c.description) : ""} (${fmt(c.length - grp.longestAvailable)}mm over)</li>`;
+      });
+      html += `</ul></div>`;
+    });
+    html += `</div>`;
+  }
+
   nestResult.groupsOutput.forEach(g => {
     html += `<div class="card"><h2>${escapeHtml(g.profile)} — ${escapeHtml(g.grade)}</h2>`;
     if (g.bars.length === 0) html += `<div class="empty-state">No cuts.</div>`;
