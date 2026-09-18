@@ -500,9 +500,20 @@ function renderCutList() {
   if (!nestResult) { content.innerHTML = `<div class="empty-state">Run nesting first.</div>`; statsEl.innerHTML = ""; return; }
 
   const kerf = Number(document.getElementById("kerfInput").value) || 0;
+
+  let totalCapacity = 0, totalUsedAll = 0;
+  nestResult.groupsOutput.forEach(g => {
+    g.bars.forEach(bar => {
+      totalCapacity += bar.capacity;
+      totalUsedAll += (bar.capacity - bar.remaining);
+    });
+  });
+  const overallUtilization = totalCapacity > 0 ? (totalUsedAll / totalCapacity) * 100 : 0;
+
   statsEl.innerHTML = `
     <div class="stat-box good"><div class="label">Offcuts reused</div><div class="value">${nestResult.totalOffcutsUsed}</div></div>
     <div class="stat-box"><div class="label">New bars to cut</div><div class="value">${nestResult.totalNewBars}</div></div>
+    <div class="stat-box ${overallUtilization >= 90 ? "good" : overallUtilization >= 75 ? "" : "warn"}"><div class="label">Utilization</div><div class="value">${overallUtilization.toFixed(1)}%</div></div>
     <div class="stat-box warn"><div class="label">Scrap generated</div><div class="value">${fmt(nestResult.totalScrap)} mm</div></div>
     <div class="stat-box"><div class="label">Blade kerf used</div><div class="value">${kerf} mm</div></div>
     ${nestResult.oversizedCuts.length > 0 ? `<div class="stat-box warn"><div class="label">Needs splice/special order</div><div class="value">${nestResult.oversizedCuts.length}</div></div>` : ""}
@@ -538,12 +549,14 @@ function renderCutList() {
   html += `<div class="card"><h2>MM Cut List</h2>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Item</th><th>Stock Length</th><th>Cuts (mm)</th><th>Total Used (mm)</th><th>Source</th></tr></thead>
+        <thead><tr><th>Item</th><th>Stock Length</th><th>Cuts (mm)</th><th>Total Used (mm)</th><th>Utilization</th><th>Source</th></tr></thead>
         <tbody>`;
   nestResult.groupsOutput.forEach(g => {
     const itemLabel = `${g.profile} (${g.grade})`;
     g.bars.forEach(bar => {
       const totalUsed = Math.round(bar.capacity - bar.remaining);
+      const utilPct = (totalUsed / bar.capacity) * 100;
+      const utilColor = utilPct >= 90 ? "var(--good)" : utilPct >= 75 ? "var(--text)" : "var(--warn)";
       const cutsText = bar.cuts.map(c => fmt(c.length)).join(", ");
       const pillClass = bar.source === "offcut" ? "offcut" : "new";
       const sourceLabel = bar.source === "offcut" ? `Offcut #${String(bar.id).slice(0, 8)}` : "New";
@@ -552,6 +565,7 @@ function renderCutList() {
         <td>${fmt(bar.capacity)}</td>
         <td>${cutsText}</td>
         <td>${fmt(totalUsed)}</td>
+        <td style="color:${utilColor};font-weight:600;">${utilPct.toFixed(1)}%</td>
         <td><span class="pill ${pillClass}">${sourceLabel}</span></td>
       </tr>`;
     });
@@ -681,7 +695,7 @@ document.getElementById("manAddBtn").addEventListener("click", async () => {
 document.getElementById("commitBtn").addEventListener("click", async () => {
   if (!nestResult) { setMsg("commitMsg", "Run nesting first.", "error"); return; }
   if (!supabaseClient) { setMsg("commitMsg", "Supabase not configured — nothing to commit.", "error"); return; }
-  const jobRef = document.getElementById("budgetJob").value.trim() || null;
+  const jobRef = document.getElementById("mmNumberInput").value.trim() || null;
 
   try {
     // Remove fully-consumed / reduced offcuts, then re-insert updated remainders and new offcuts
